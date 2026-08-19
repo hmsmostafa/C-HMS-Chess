@@ -6,6 +6,14 @@
         mc:Ignorable="d"
         Title="HMS Chess Environment" Height="720" Width="720" WindowStartupLocation="CenterScreen">
 
+    <!-- Setup Keyboard Shortcuts at the top of Window -->
+    <Window.InputBindings>
+        <KeyBinding Key="Up" Modifiers="Control" Command="{Binding MoveFirstCommand}"/>
+        <KeyBinding Key="Left" Command="{Binding MovePreviousCommand}"/>
+        <KeyBinding Key="Right" Command="{Binding MoveNextCommand}"/>
+        <KeyBinding Key="Down" Modifiers="Control" Command="{Binding MoveLastCommand}"/>
+    </Window.InputBindings>
+
     <Grid Background="#161512" Margin="20">
         <Grid.ColumnDefinitions>
             <!-- Column 0: The Core Interactive Board -->

@@ -7,7 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
-using System.Windows.Input; // Required for MouseButtonEventArgs
+using System.Windows.Input;
 using HMS_Chess.Engine.Modes;
 using HMS_Chess.Engine.Models;
 using HMS_Chess.Engine.Pieces;
@@ -38,6 +38,7 @@ namespace HMS_Chess
         {
             InitializeComponent();
             board = new Board();
+            InitializeNavigationSystem();
             InitializeUserInterface();
         }
         private void InitializeUserInterface()
@@ -140,7 +141,7 @@ namespace HMS_Chess
                         }
                     }
 
-                    // LAYER 8: Transparent Interaction Border Overlay (Bypasses OS focus styling completely)
+                    // LAYER 8: Transparent Interaction Border Overlay
                     Border actionOverlay = new Border
                     {
                         Background = Brushes.Transparent,
@@ -156,36 +157,42 @@ namespace HMS_Chess
 
         private Brush GetBaseSquareThemeBrush(Position pos)
         {
-            // FIXED: Changing == to != ensures a1 is dark and the bottom-right square (h1) is light
             return (pos.Row + pos.Column) % 2 != 0
                 ? new SolidColorBrush((Color)ColorConverter.ConvertFromString("#f0d9b5"))  // Solid Light sand
                 : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#b58863")); // Solid Matte brown
         }
+
         private int fullMoveCount = 1;
-        private string currentMoveRowString = "";
 
         private void Square_MouseDown(object sender, MouseButtonEventArgs e)
         {
+            // Block standard click mechanics entirely if the user is reviewing historical board states
+            if (isBrowsingHistory) return;
+
             // Process calculations only on primary left-mouse down states
             if (e.ChangedButton == MouseButton.Left && sender is Border clickedBorder && clickedBorder.Tag is Position clickedPos)
             {
                 if (highlightedMoves.Any(m => m.Equals(clickedPos)) && selectedPosition != null)
                 {
                     // READ TARGET CONTEXT BEFORE THE ENGINE ALTERS DATA
-                    Piece? movedPiece = board.GetPieceAt(selectedPosition);
+                    Position fromPos = selectedPosition ?? new Position(0, 0);
+                    Piece? movedPiece = board.GetPieceAt(fromPos);
                     Piece? capturedPiece = board.GetPieceAt(clickedPos);
 
                     if (movedPiece != null)
                     {
                         // Generate the proper FIDE algebraic notation code string
-                        string notation = GenerateAlgebraicNotation(selectedPosition, clickedPos, movedPiece, capturedPiece);
+                        string notation = GenerateAlgebraicNotation(fromPos, clickedPos, movedPiece, capturedPiece);
                         AppendMoveToLogPanel(notation, movedPiece.Color);
+
+                        // Safe timeline memory extraction hook
+                        CaptureCurrentBoardToTimeline(fromPos, clickedPos, movedPiece.Color);
                     }
 
                     // Execute the validated move on the backend grid board structure
-                    board.ExecuteMove(selectedPosition, clickedPos);
+                    board.ExecuteMove(fromPos, clickedPos);
 
-                    lastMoveFrom = selectedPosition;
+                    lastMoveFrom = fromPos;
                     lastMoveTo = clickedPos;
 
                     Piece? checkPromotionPiece = board.GetPieceAt(clickedPos);
@@ -198,6 +205,7 @@ namespace HMS_Chess
                         return;
                     }
 
+                    // Advance the turn sequence loop
                     AdvanceTurnSequence();
                 }
                 else
@@ -216,8 +224,6 @@ namespace HMS_Chess
                 InitializeUserInterface();
             }
         }
-
-
         private void AdvanceTurnSequence()
         {
             currentTurn = (currentTurn == PieceColor.White) ? PieceColor.Black : PieceColor.White;
@@ -229,25 +235,42 @@ namespace HMS_Chess
         {
             if (color == PieceColor.White)
             {
-                // Start a new numbering index block row string for White
-                currentMoveRowString = $"{fullMoveCount}. {notation}";
+                StackPanel horizontalMoveRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
 
-                TextBlock moveRow = new TextBlock
+                TextBlock numLabel = new TextBlock { Text = $"{fullMoveCount}. ", Foreground = Brushes.Gray, FontSize = 14, FontWeight = FontWeights.Medium, Width = 30 };
+
+                TextBlock whiteTextButton = new TextBlock
                 {
-                    Text = currentMoveRowString,
+                    Text = notation,
                     Foreground = Brushes.White,
                     FontSize = 14,
-                    Margin = new Thickness(0, 4, 0, 4),
-                    FontWeight = FontWeights.Medium
+                    FontWeight = FontWeights.Medium,
+                    Cursor = Cursors.Hand,
+                    Tag = historyTimeline.Count // Hooks index to text element before timeline expansion
                 };
-                MoveLogStackPanel.Children.Add(moveRow);
+                whiteTextButton.MouseDown += (s, e) => JumpToHistoryFrame((int)((TextBlock)s).Tag);
+
+                horizontalMoveRow.Children.Add(numLabel);
+                horizontalMoveRow.Children.Add(whiteTextButton);
+                MoveLogStackPanel.Children.Add(horizontalMoveRow);
             }
             else
             {
-                // Find and update the existing line row for Black's matching response turn
-                if (MoveLogStackPanel.Children.Count > 0 && MoveLogStackPanel.Children[MoveLogStackPanel.Children.Count - 1] is TextBlock lastRow)
+                if (MoveLogStackPanel.Children.Count > 0 && MoveLogStackPanel.Children[MoveLogStackPanel.Children.Count - 1] is StackPanel activeRow)
                 {
-                    lastRow.Text = $"{lastRow.Text}   {notation}";
+                    TextBlock blackTextButton = new TextBlock
+                    {
+                        Text = notation,
+                        Foreground = Brushes.White,
+                        FontSize = 14,
+                        FontWeight = FontWeights.Medium,
+                        Cursor = Cursors.Hand,
+                        Margin = new Thickness(20, 0, 0, 0),
+                        Tag = historyTimeline.Count
+                    };
+                    blackTextButton.MouseDown += (s, e) => JumpToHistoryFrame((int)((TextBlock)s).Tag);
+
+                    activeRow.Children.Add(blackTextButton);
                 }
                 fullMoveCount++; // Increment current move index loop tracking
             }
@@ -255,7 +278,6 @@ namespace HMS_Chess
             // Automatically force the scroll viewer to stay tracked to the bottom item
             MoveLogScrollViewer.ScrollToEnd();
         }
-
 
         private void ShowPromotionModal(PieceColor color)
         {
@@ -266,7 +288,8 @@ namespace HMS_Chess
             {
                 Button optionButton = new Button
                 {
-                    Width = 80, Height = 80,
+                    Width = 80,
+                    Height = 80,
                     Margin = new Thickness(5),
                     Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#363532")),
                     BorderThickness = new Thickness(0),
@@ -275,7 +298,7 @@ namespace HMS_Chess
 
                 string colorLetter = color == PieceColor.White ? "w" : "b";
                 string fullPath = System.IO.Path.Combine(assetsPath, $"{colorLetter}{type}.png");
-                
+
                 if (File.Exists(fullPath))
                 {
                     Image img = new Image { Source = new BitmapImage(new Uri(fullPath, UriKind.Absolute)) };
@@ -300,11 +323,23 @@ namespace HMS_Chess
                     "R" => new Rook(color, promotionPendingPosition),
                     "B" => new Bishop(color, promotionPendingPosition),
                     "N" => new Knight(color, promotionPendingPosition),
-                    _   => new Queen(color, promotionPendingPosition)
+                    _ => new Queen(color, promotionPendingPosition)
                 };
 
                 board.SetPieceAt(promotionPendingPosition, newPiece);
-                
+
+                // Update promotion property data inside history track state elements
+                if (historyTimeline.Count > 0)
+                {
+                    historyTimeline[historyTimeline.Count - 1].SavedBoardState.SetPieceAt(promotionPendingPosition, newPiece);
+                }
+
+                if (MoveLogStackPanel.Children.Count > 0 && MoveLogStackPanel.Children[MoveLogStackPanel.Children.Count - 1] is StackPanel activeRow)
+                {
+                    var lastTxt = activeRow.Children.OfType<TextBlock>().LastOrDefault();
+                    if (lastTxt != null) lastTxt.Text += $"={choice}";
+                }
+
                 PromotionOverlay.Visibility = Visibility.Collapsed;
                 promotionPendingPosition = null;
 
@@ -331,10 +366,8 @@ namespace HMS_Chess
             highlightedMoves.Clear();
         }
 
-        // Converts coordinate actions into professional Algebraic Notation format strings
         private string GenerateAlgebraicNotation(Position from, Position to, Piece movedPiece, Piece? capturedPiece)
         {
-            // 1. Handle Kingside vs Queenside Castling detection patterns
             if (movedPiece is King && Math.Abs(to.Column - from.Column) == 2)
             {
                 return (to.Column > from.Column) ? "O-O" : "O-O-O";
@@ -342,24 +375,20 @@ namespace HMS_Chess
 
             string moveString = string.Empty;
 
-            // 2. Add prefix tracking for pieces (Pawns remain headless empty identifiers unless capturing)
             if (movedPiece is not Pawn)
             {
                 moveString += GetPieceAbbreviation(movedPiece);
             }
 
-            // 3. Append capturing delimiters ('x') according to official rules
             if (capturedPiece != null || (movedPiece is Pawn && from.Column != to.Column))
             {
                 if (movedPiece is Pawn)
                 {
-                    // Pawns prefix their native starting file letter when capturing (e.g., exd5)
                     moveString += (char)('a' + from.Column);
                 }
                 moveString += "x";
             }
 
-            // 4. Map the targeting grid cell coordinates
             char file = (char)('a' + to.Column);
             int rank = to.Row + 1;
             moveString += $"{file}{rank}";
@@ -381,14 +410,17 @@ namespace HMS_Chess
             };
         }
 
-
         private ImageSource? GetPieceImageSource(Piece piece)
         {
             string colorLetter = piece.Color == PieceColor.White ? "w" : "b";
             string initial = piece switch
             {
-                King => "K", Queen => "Q", Rook => "R",
-                Bishop => "B", Knight => "N", Pawn => "P",
+                King => "K",
+                Queen => "Q",
+                Rook => "R",
+                Bishop => "B",
+                Knight => "N",
+                Pawn => "P",
                 _ => string.Empty
             };
 
