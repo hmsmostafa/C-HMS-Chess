@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using System.Windows.Input; // Required for MouseButtonEventArgs
 using HMS_Chess.Engine.Modes;
 using HMS_Chess.Engine.Models;
 using HMS_Chess.Engine.Pieces;
@@ -52,37 +53,73 @@ namespace HMS_Chess
             {
                 for (int col = 0; col < 8; col++)
                 {
-                    // Invert rendering row index so White sits correctly at the bottom row frame
                     int displayRow = 7 - row;
                     Position pos = new Position(displayRow, col);
                     Piece? piece = board.GetPieceAt(pos);
 
-                    // Dynamic Background Assignment handles highlights BEFORE drawing children
-                    Grid cellContainer = new Grid { Background = GetSquareVisualBrush(pos) };
+                    // LAYER 1: Base Container (Kept transparent to isolate layers)
+                    Grid cellContainer = new Grid { Background = Brushes.Transparent };
 
-                    // LAYER 1: Render Graphical Pieces (Draws flat on top of the Grid background color)
+                    // LAYER 2: Core Board Square Background
+                    cellContainer.Children.Add(new Rectangle
+                    {
+                        Fill = GetBaseSquareThemeBrush(pos),
+                        IsHitTestVisible = false
+                    });
+
+                    // LAYER 3: Last Move Highlight Overlay (Solid Khaki Olive underneath pieces)
+                    if (pos.Equals(lastMoveFrom) || pos.Equals(lastMoveTo))
+                    {
+                        cellContainer.Children.Add(new Rectangle
+                        {
+                            Fill = new SolidColorBrush(Color.FromRgb(186, 196, 73)),
+                            IsHitTestVisible = false
+                        });
+                    }
+
+                    // LAYER 4: Check Warning Highlight Overlay (Solid Crimson underneath pieces)
+                    if (checkedKingPosition != null && pos.Equals(checkedKingPosition))
+                    {
+                        cellContainer.Children.Add(new Rectangle
+                        {
+                            Fill = new SolidColorBrush(Color.FromRgb(217, 59, 59)),
+                            IsHitTestVisible = false
+                        });
+                    }
+
+                    // LAYER 5: Active Selection Highlight Overlay (Crisp Square Border Outline)
+                    if (selectedPosition != null && pos.Equals(selectedPosition))
+                    {
+                        cellContainer.Children.Add(new Rectangle
+                        {
+                            Stroke = new SolidColorBrush(Color.FromRgb(247, 247, 105)),
+                            StrokeThickness = 4,
+                            IsHitTestVisible = false
+                        });
+                    }
+
+                    // LAYER 6: Graphical Pieces (Guaranteed on top of background fills/borders)
                     if (piece != null)
                     {
                         Image pieceImage = new Image
                         {
                             Source = GetPieceImageSource(piece),
-                            Margin = new Thickness(2),
-                            IsHitTestVisible = false // Prevents transparency layers from trapping mouse updates
+                            Margin = new Thickness(4),
+                            IsHitTestVisible = false
                         };
                         RenderOptions.SetBitmapScalingMode(pieceImage, BitmapScalingMode.HighQuality);
                         cellContainer.Children.Add(pieceImage);
                     }
 
-                    // LAYER 2: Lichess Move Indicator Overlays (Dots and Targets)
+                    // LAYER 7: Lichess Move Indicator Overlays (Dots and Targets)
                     if (highlightedMoves.Any(m => m.Equals(pos)))
                     {
                         if (piece == null)
                         {
-                            // Empty Target square -> Center Dot indicator
                             Ellipse dot = new Ellipse
                             {
-                                Width = 20,
-                                Height = 20,
+                                Width = 22,
+                                Height = 22,
                                 Fill = new SolidColorBrush(Color.FromArgb(65, 0, 0, 0)),
                                 HorizontalAlignment = HorizontalAlignment.Center,
                                 VerticalAlignment = VerticalAlignment.Center,
@@ -92,10 +129,9 @@ namespace HMS_Chess
                         }
                         else
                         {
-                            // Occupied Enemy target square -> Target Frame Ring Border outline
                             Ellipse ring = new Ellipse
                             {
-                                Margin = new Thickness(2),
+                                Margin = new Thickness(4),
                                 Stroke = new SolidColorBrush(Color.FromArgb(75, 0, 0, 0)),
                                 StrokeThickness = 5,
                                 IsHitTestVisible = false
@@ -104,14 +140,13 @@ namespace HMS_Chess
                         }
                     }
 
-                    // LAYER 3: Transparent Interaction Action Button Overlay
-                    Button actionOverlay = new Button
+                    // LAYER 8: Transparent Interaction Border Overlay (Bypasses OS focus styling completely)
+                    Border actionOverlay = new Border
                     {
                         Background = Brushes.Transparent,
-                        BorderThickness = new Thickness(0),
                         Tag = pos
                     };
-                    actionOverlay.Click += Square_Click;
+                    actionOverlay.MouseDown += Square_MouseDown;
                     cellContainer.Children.Add(actionOverlay);
 
                     ChessBoardGrid.Children.Add(cellContainer);
@@ -119,45 +154,46 @@ namespace HMS_Chess
             }
         }
 
-        // Consolidates state prioritizations straight to the underlying tile pixel brush
-        private Brush GetSquareVisualBrush(Position pos)
+        private Brush GetBaseSquareThemeBrush(Position pos)
         {
-            if (checkedKingPosition != null && pos.Equals(checkedKingPosition))
-            {
-                return new SolidColorBrush(Color.FromRgb(217, 59, 59)); // Matte Crimson
-            }
-
-            if (selectedPosition != null && pos.Equals(selectedPosition))
-            {
-                return new SolidColorBrush(Color.FromRgb(247, 247, 105)); // Lichess Matte Yellow
-            }
-
-            if (pos.Equals(lastMoveFrom) || pos.Equals(lastMoveTo))
-            {
-                return new SolidColorBrush(Color.FromRgb(186, 196, 73)); // Khaki Olive
-            }
-
-            return (pos.Row + pos.Column) % 2 == 0
-                ? new SolidColorBrush((Color)ColorConverter.ConvertFromString("#f0d9b5"))
-                : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#b58863"));
+            // FIXED: Changing == to != ensures a1 is dark and the bottom-right square (h1) is light
+            return (pos.Row + pos.Column) % 2 != 0
+                ? new SolidColorBrush((Color)ColorConverter.ConvertFromString("#f0d9b5"))  // Solid Light sand
+                : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#b58863")); // Solid Matte brown
         }
-        private void Square_Click(object sender, RoutedEventArgs e)
+        private int fullMoveCount = 1;
+        private string currentMoveRowString = "";
+
+        private void Square_MouseDown(object sender, MouseButtonEventArgs e)
         {
-            if (sender is Button clickedButton && clickedButton.Tag is Position clickedPos)
+            // Process calculations only on primary left-mouse down states
+            if (e.ChangedButton == MouseButton.Left && sender is Border clickedBorder && clickedBorder.Tag is Position clickedPos)
             {
                 if (highlightedMoves.Any(m => m.Equals(clickedPos)) && selectedPosition != null)
                 {
+                    // READ TARGET CONTEXT BEFORE THE ENGINE ALTERS DATA
+                    Piece? movedPiece = board.GetPieceAt(selectedPosition);
+                    Piece? capturedPiece = board.GetPieceAt(clickedPos);
+
+                    if (movedPiece != null)
+                    {
+                        // Generate the proper FIDE algebraic notation code string
+                        string notation = GenerateAlgebraicNotation(selectedPosition, clickedPos, movedPiece, capturedPiece);
+                        AppendMoveToLogPanel(notation, movedPiece.Color);
+                    }
+
+                    // Execute the validated move on the backend grid board structure
                     board.ExecuteMove(selectedPosition, clickedPos);
 
                     lastMoveFrom = selectedPosition;
                     lastMoveTo = clickedPos;
 
-                    Piece? movedPiece = board.GetPieceAt(clickedPos);
-                    if (movedPiece is Pawn && (clickedPos.Row == 7 || clickedPos.Row == 0))
+                    Piece? checkPromotionPiece = board.GetPieceAt(clickedPos);
+                    if (checkPromotionPiece is Pawn && (clickedPos.Row == 7 || clickedPos.Row == 0))
                     {
-                        // Pause normal turn switching loops and launch selection panel overlay instead
+                        // Pause turn rotation loops and launch selection panel overlay instead
                         promotionPendingPosition = clickedPos;
-                        ShowPromotionModal(movedPiece.Color);
+                        ShowPromotionModal(checkPromotionPiece.Color);
                         ClearSelectionStates();
                         return;
                     }
@@ -181,13 +217,47 @@ namespace HMS_Chess
             }
         }
 
+
         private void AdvanceTurnSequence()
         {
             currentTurn = (currentTurn == PieceColor.White) ? PieceColor.Black : PieceColor.White;
             ClearSelectionStates();
             CheckEndGameConditions();
         }
-                private void ShowPromotionModal(PieceColor color)
+
+        private void AppendMoveToLogPanel(string notation, PieceColor color)
+        {
+            if (color == PieceColor.White)
+            {
+                // Start a new numbering index block row string for White
+                currentMoveRowString = $"{fullMoveCount}. {notation}";
+
+                TextBlock moveRow = new TextBlock
+                {
+                    Text = currentMoveRowString,
+                    Foreground = Brushes.White,
+                    FontSize = 14,
+                    Margin = new Thickness(0, 4, 0, 4),
+                    FontWeight = FontWeights.Medium
+                };
+                MoveLogStackPanel.Children.Add(moveRow);
+            }
+            else
+            {
+                // Find and update the existing line row for Black's matching response turn
+                if (MoveLogStackPanel.Children.Count > 0 && MoveLogStackPanel.Children[MoveLogStackPanel.Children.Count - 1] is TextBlock lastRow)
+                {
+                    lastRow.Text = $"{lastRow.Text}   {notation}";
+                }
+                fullMoveCount++; // Increment current move index loop tracking
+            }
+
+            // Automatically force the scroll viewer to stay tracked to the bottom item
+            MoveLogScrollViewer.ScrollToEnd();
+        }
+
+
+        private void ShowPromotionModal(PieceColor color)
         {
             PromotionOptionsPanel.Children.Clear();
             string[] piecesToPromote = { "Q", "R", "B", "N" };
@@ -261,6 +331,57 @@ namespace HMS_Chess
             highlightedMoves.Clear();
         }
 
+        // Converts coordinate actions into professional Algebraic Notation format strings
+        private string GenerateAlgebraicNotation(Position from, Position to, Piece movedPiece, Piece? capturedPiece)
+        {
+            // 1. Handle Kingside vs Queenside Castling detection patterns
+            if (movedPiece is King && Math.Abs(to.Column - from.Column) == 2)
+            {
+                return (to.Column > from.Column) ? "O-O" : "O-O-O";
+            }
+
+            string moveString = string.Empty;
+
+            // 2. Add prefix tracking for pieces (Pawns remain headless empty identifiers unless capturing)
+            if (movedPiece is not Pawn)
+            {
+                moveString += GetPieceAbbreviation(movedPiece);
+            }
+
+            // 3. Append capturing delimiters ('x') according to official rules
+            if (capturedPiece != null || (movedPiece is Pawn && from.Column != to.Column))
+            {
+                if (movedPiece is Pawn)
+                {
+                    // Pawns prefix their native starting file letter when capturing (e.g., exd5)
+                    moveString += (char)('a' + from.Column);
+                }
+                moveString += "x";
+            }
+
+            // 4. Map the targeting grid cell coordinates
+            char file = (char)('a' + to.Column);
+            int rank = to.Row + 1;
+            moveString += $"{file}{rank}";
+
+            return moveString;
+        }
+
+        private string GetPieceAbbreviation(Piece piece)
+        {
+            return piece switch
+            {
+                King => "K",
+                Queen => "Q",
+                Rook => "R",
+                Bishop => "B",
+                Knight => "N",
+                Pawn => "P",
+                _ => string.Empty
+            };
+        }
+
+
         private ImageSource? GetPieceImageSource(Piece piece)
         {
             string colorLetter = piece.Color == PieceColor.White ? "w" : "b";
@@ -279,5 +400,4 @@ namespace HMS_Chess
         }
     }
 }
-
 

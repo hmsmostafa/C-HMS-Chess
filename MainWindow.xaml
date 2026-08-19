@@ -6,14 +6,38 @@
         mc:Ignorable="d"
         Title="HMS Chess Environment" Height="720" Width="720" WindowStartupLocation="CenterScreen">
 
-    <Grid Background="#161512">
-        <!-- Main Board Base Layout -->
-        <Border Padding="20" BorderBrush="#2a2824" BorderThickness="2" CornerRadius="4" HorizontalAlignment="Center" VerticalAlignment="Center">
+    <Grid Background="#161512" Margin="20">
+        <Grid.ColumnDefinitions>
+            <!-- Column 0: The Core Interactive Board -->
+            <ColumnDefinition Width="Auto"/>
+            <!-- Column 1: Arena-style Move Sidebar Panel -->
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Main Chess Board Canvas Layout Frame -->
+        <Border Grid.Column="0" BorderBrush="#2a2824" BorderThickness="2" CornerRadius="4" HorizontalAlignment="Center" VerticalAlignment="Center">
             <UniformGrid x:Name="ChessBoardGrid" Rows="8" Columns="8" Width="640" Height="640"/>
         </Border>
 
-        <!-- Lichess-style Promotion Modal Popup Layer -->
-        <Grid x:Name="PromotionOverlay" Visibility="Collapsed" Background="#99000000">
+        <!-- PGN Log Navigation Sidebar -->
+        <Border Grid.Column="1" Margin="20,0,0,0" Background="#262522" BorderBrush="#2a2824" BorderThickness="1" CornerRadius="4" Padding="15">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="Match Move Log (PGN)" Foreground="#999" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
+
+                <!-- Scrollable container holds dynamic row elements programmatically -->
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" x:Name="MoveLogScrollViewer">
+                    <StackPanel x:Name="MoveLogStackPanel"/>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- Lichess-style Promotion Modal Popup Layer (Spans across all workspace cells) -->
+        <Grid Grid.ColumnSpan="2" x:Name="PromotionOverlay" Visibility="Collapsed" Background="#99000000">
             <Border Background="#262522" CornerRadius="8" BorderBrush="#363532" BorderThickness="2" 
                     HorizontalAlignment="Center" VerticalAlignment="Center" Padding="15">
                 <StackPanel Orientation="Vertical">
